@@ -110,7 +110,6 @@ class ExerciseItem {
 // 工具函数 (Utils)
 // ==========================================
 
-// ISO 8601 正确的周数计算
 int getIsoWeekNumber(DateTime date) {
   DateTime thursday = date.add(Duration(days: 4 - date.weekday));
   DateTime firstDayOfYear = DateTime(thursday.year, 1, 1);
@@ -152,7 +151,6 @@ class StorageService {
     await prefs.setString(_storageKey, rawJson);
   }
 
-  // 固定的初始化 Mock 数据（带固定锚点日期）
   static List<ExerciseItem> getMockInitialData() {
     final anchor = DateTime(2026, 7, 20);
     return [
@@ -210,10 +208,26 @@ class _HomePageState extends State<HomePage> {
   DateTime _selectedDate = DateTime.now();
   bool _isLoading = true;
 
+  // 日历范围参数：过去 50 周，未来 20 周
+  final int _pastWeeks = 50;
+  final int _futureWeeks = 20;
+  final double _weekRowHeight = 64.0;
+  late ScrollController _calendarScrollController;
+
   @override
   void initState() {
     super.initState();
+    // 自动滚动定位到当前周
+    _calendarScrollController = ScrollController(
+      initialScrollOffset: _pastWeeks * _weekRowHeight,
+    );
     _loadData();
+  }
+
+  @override
+  void dispose() {
+    _calendarScrollController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadData() async {
@@ -235,7 +249,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // 计算连续打卡天数
   int _calculateStreak() {
     if (_exercises.isEmpty) return 0;
     DateTime checkDate = DateTime.now();
@@ -264,7 +277,6 @@ class _HomePageState extends State<HomePage> {
     return streak;
   }
 
-  // 某日综合完成状态 (2: 全部完成, 1: 部分完成, 0: 未打卡)
   int _getDailyStatus(DateTime date) {
     if (_exercises.isEmpty) return 0;
     int completedCount = 0;
@@ -282,10 +294,9 @@ class _HomePageState extends State<HomePage> {
   }
 
   // ------------------------------------------
-  // 弹窗逻辑 (Dialogs)
+  // 弹窗逻辑
   // ------------------------------------------
 
-  // 打卡弹窗（含输入校验与快捷增加按钮）
   void _showRecordDialog(ExerciseItem item) {
     final controller = TextEditingController();
     showDialog(
@@ -357,7 +368,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // 添加/修改运动项目弹窗
   void _showExerciseItemDialog({ExerciseItem? item}) {
     final nameCtrl = TextEditingController(text: item?.name ?? '');
     final unitCtrl = TextEditingController(text: item?.unit ?? '分钟');
@@ -416,7 +426,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // 删除运动项目二次确认
   void _confirmDeleteExercise(ExerciseItem item) {
     showDialog(
       context: context,
@@ -440,7 +449,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // 当日打卡明细列表 Modal
   void _showDayDetailsModal(ExerciseItem item) {
     final dayLogs = item.history
         .where((e) =>
@@ -508,7 +516,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   // ------------------------------------------
-  // 界面构建 (UI Build)
+  // 界面构建
   // ------------------------------------------
 
   @override
@@ -534,7 +542,14 @@ class _HomePageState extends State<HomePage> {
           IconButton(
             icon: const Icon(Icons.today),
             tooltip: '回到今天',
-            onPressed: () => setState(() => _selectedDate = DateTime.now()),
+            onPressed: () {
+              setState(() => _selectedDate = DateTime.now());
+              _calendarScrollController.animateTo(
+                _pastWeeks * _weekRowHeight,
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+              );
+            },
           ),
           IconButton(
             icon: const Icon(Icons.add),
@@ -545,10 +560,9 @@ class _HomePageState extends State<HomePage> {
       ),
       body: Column(
         children: [
-          // 1. 顶部统计摘要面板 (Dashboard)
           _buildHeaderDashboard(completedToday),
 
-          // 2. 2周视图滚动日历 (2-Week Calendar)
+          // 2 周高对比滚动日历
           Container(
             height: 165,
             decoration: BoxDecoration(
@@ -558,7 +572,6 @@ class _HomePageState extends State<HomePage> {
             child: _buildTwoWeekCalendar(),
           ),
 
-          // 3. 紧凑型运动项目列表
           Expanded(
             child: _exercises.isEmpty
                 ? Center(
@@ -600,7 +613,6 @@ class _HomePageState extends State<HomePage> {
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                             child: Row(
                               children: [
-                                // 高亮对勾图标
                                 Icon(
                                   isFinished ? Icons.check_circle : Icons.circle_outlined,
                                   color: isFinished ? Colors.green : Colors.grey,
@@ -608,7 +620,6 @@ class _HomePageState extends State<HomePage> {
                                 ),
                                 const SizedBox(width: 10),
 
-                                // 中间：项目名称与进度
                                 Expanded(
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -644,7 +655,6 @@ class _HomePageState extends State<HomePage> {
                                   ),
                                 ),
 
-                                // 右侧极简图标操作组
                                 IconButton(
                                   icon: const Icon(Icons.list_alt, size: 20),
                                   tooltip: '打卡明细',
@@ -679,7 +689,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // 构建顶部摘要看板
   Widget _buildHeaderDashboard(int completedToday) {
     int streak = _calculateStreak();
     return Container(
@@ -712,30 +721,42 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // 构建 2 周滚动日历
+  // 构建带月份清晰标注与大时间范围的滚动日历
   Widget _buildTwoWeekCalendar() {
     final now = DateTime.now();
-    List<DateTime> weekMondays = List.generate(10, (i) {
-      int offset = i - 7;
+    // 扩展范围：生成从 50 周前到 20 周后的周列表
+    List<DateTime> weekMondays = List.generate(_pastWeeks + _futureWeeks, (i) {
+      int offset = i - _pastWeeks;
       DateTime monday = now.subtract(Duration(days: now.weekday - 1));
       return monday.add(Duration(days: offset * 7));
     });
 
     return ListView.builder(
+      controller: _calendarScrollController,
       itemCount: weekMondays.length,
       itemBuilder: (context, index) {
         DateTime monday = weekMondays[index];
+        DateTime sunday = monday.add(const Duration(days: 6));
         int weekNum = getIsoWeekNumber(monday);
         int year = getIsoYear(monday);
 
+        // 智能月份标签显示 (如: 7月 或 跨月时 7月~8月)
+        String monthLabel = monday.month == sunday.month
+            ? '${monday.month}月'
+            : '${monday.month}月~${sunday.month}月';
+
         return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '$year年 第$weekNum周',
-                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey),
+                '$year年 $monthLabel (第$weekNum周)',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.indigo.shade800,
+                ),
               ),
               const SizedBox(height: 2),
               Row(
@@ -751,7 +772,7 @@ class _HomePageState extends State<HomePage> {
                     onTap: () => setState(() => _selectedDate = day),
                     child: Container(
                       width: 42,
-                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      padding: const EdgeInsets.symmetric(vertical: 3),
                       decoration: BoxDecoration(
                         color: isSelected ? Colors.indigo.shade100 : Colors.white,
                         borderRadius: BorderRadius.circular(6),
@@ -769,6 +790,12 @@ class _HomePageState extends State<HomePage> {
                               fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                             ),
                           ),
+                          // 当月 1 号额外显示月份提醒
+                          if (day.day == 1)
+                            Text(
+                              '${day.month}月',
+                              style: const TextStyle(fontSize: 8, color: Colors.indigo, fontWeight: FontWeight.bold),
+                            ),
                           const SizedBox(height: 2),
                           if (status == 2)
                             const Icon(Icons.check_circle, size: 12, color: Colors.green)
@@ -791,7 +818,7 @@ class _HomePageState extends State<HomePage> {
 }
 
 // ==========================================
-// 趋势图 BottomSheet 组件 (Trend Chart)
+// 趋势图 BottomSheet 组件
 // ==========================================
 
 class TrendChartSheet extends StatefulWidget {
@@ -852,7 +879,6 @@ class _TrendChartSheetState extends State<TrendChartSheet> {
   List<MapEntry<String, double>> _processData() {
     if (widget.item.history.isEmpty) return [];
 
-    // 对历史记录先按日期排序
     List<LogEntry> sorted = List.from(widget.item.history)..sort((a, b) => a.date.compareTo(b.date));
     Map<String, double> map = {};
 
@@ -871,7 +897,6 @@ class _TrendChartSheetState extends State<TrendChartSheet> {
   }
 }
 
-// 经过 Bug 修复与图例增强的 CustomPainter
 class LineChartPainter extends CustomPainter {
   final List<MapEntry<String, double>> data;
   final double target;
@@ -888,18 +913,16 @@ class LineChartPainter extends CustomPainter {
       if (e.value > maxVal) maxVal = e.value;
     }
 
-    // Bug 修复：除零异常保护
     if (maxVal <= 0) {
       maxVal = 10;
     } else {
-      maxVal *= 1.25; // 顶部预留留白
+      maxVal *= 1.25;
     }
 
     final double chartTop = 15;
     final double chartBottom = size.height - 30;
     final double chartHeight = chartBottom - chartTop;
 
-    // 绘制 Y 轴背景刻度线与刻度值
     final gridPaint = Paint()
       ..color = Colors.grey.shade200
       ..strokeWidth = 1;
@@ -919,7 +942,6 @@ class LineChartPainter extends CustomPainter {
       )..layout()..paint(canvas, Offset(0, y - 10));
     }
 
-    // 绘制目标红虚线
     if (target > 0) {
       double targetY = chartBottom - (target / maxVal * chartHeight);
       final paintTarget = Paint()
@@ -942,7 +964,6 @@ class LineChartPainter extends CustomPainter {
       )..layout()..paint(canvas, Offset(size.width - 80, targetY - 14));
     }
 
-    // 绘制折线与数据点
     double stepX = data.length > 1 ? size.width / (data.length - 1) : size.width / 2;
     List<Offset> points = [];
 
@@ -951,13 +972,11 @@ class LineChartPainter extends CustomPainter {
       double y = chartBottom - (data[i].value / maxVal * chartHeight);
       points.add(Offset(x, y));
 
-      // X 轴日期标签
       TextPainter(
         text: TextSpan(text: data[i].key, style: const TextStyle(fontSize: 10, color: Colors.black87)),
         textDirection: TextDirection.ltr,
       )..layout()..paint(canvas, Offset(x - 12, chartBottom + 6));
 
-      // 数据点数值
       TextPainter(
         text: TextSpan(
           text: '${data[i].value.toStringAsFixed(data[i].value % 1 == 0 ? 0 : 1)}',
@@ -967,7 +986,6 @@ class LineChartPainter extends CustomPainter {
       )..layout()..paint(canvas, Offset(x - 8, y - 16));
     }
 
-    // 连线
     final paintLine = Paint()
       ..color = Colors.indigo
       ..strokeWidth = 2.5
@@ -980,7 +998,6 @@ class LineChartPainter extends CustomPainter {
     }
     canvas.drawPath(path, paintLine);
 
-    // 绘制圆点
     final paintDot = Paint()..color = Colors.indigo;
     final paintDotInner = Paint()..color = Colors.white;
 
