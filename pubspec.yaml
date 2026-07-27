@@ -1,5 +1,5 @@
 name: my_sports_tracker
-description: A new Flutter project.
+description: 运动记事本 Pro - 个人运动打卡工具
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -10,6 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.6
+  shared_preferences: ^2.2.2 # 引入本地持久化库
 
 flutter:
   uses-material-design: true
