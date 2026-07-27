@@ -620,7 +620,7 @@ class _HomePageState extends State<HomePage> {
                                             style: TextStyle(
                                               fontSize: 16,
                                               fontWeight: FontWeight.bold,
-                                              color: isFinished ? Colors.green.shade900 : Colors.black80,
+                                              color: isFinished ? Colors.green.shade900 : Colors.black87,
                                             ),
                                           ),
                                           const SizedBox(width: 8),
@@ -953,7 +953,7 @@ class LineChartPainter extends CustomPainter {
 
       // X 轴日期标签
       TextPainter(
-        text: TextSpan(text: data[i].key, style: const TextStyle(fontSize: 10, color: Colors.black80)),
+        text: TextSpan(text: data[i].key, style: const TextStyle(fontSize: 10, color: Colors.black87)),
         textDirection: TextDirection.ltr,
       )..layout()..paint(canvas, Offset(x - 12, chartBottom + 6));
 
