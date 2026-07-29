@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() async {
@@ -28,6 +29,35 @@ class SportsTrackerApp extends StatelessWidget {
       ),
       home: const HomePage(),
     );
+  }
+}
+
+// ==========================================
+// 毛主席语录数据库与轮换工具
+// ==========================================
+
+class MaoQuotes {
+  static const List<String> quotes = [
+    "文明其精神，野蛮其体魄。",
+    "世上无难事，只要肯登攀。",
+    "身体是革命的本钱。",
+    "下定决心，不怕牺牲，排除万难，去争取胜利。",
+    "发扬革命传统，争取更大光荣。",
+    "雄关漫道真如铁，而今迈步从头越。",
+    "自信人生二百年，会当水击三千里。",
+    "一万年太久，只争朝夕。",
+    "虚心使人进步，骄傲使人落后。",
+    "风物长宜放眼量。",
+    "星火燎原，勤学苦练。",
+    "好好学习，天天向上。",
+    "独有英雄驱虎豹，更无豪杰怕熊罴。",
+    "苟日新，日日新，又日新。",
+    "贵在坚持，重在积累，终生受益。",
+  ];
+
+  static String getQuoteForDate(DateTime date) {
+    int dayIndex = (date.year * 365 + date.month * 31 + date.day);
+    return quotes[dayIndex % quotes.length];
   }
 }
 
@@ -164,7 +194,6 @@ class StorageService {
           LogEntry(id: 'l2', date: anchor.subtract(const Duration(days: 1)), value: 25),
           LogEntry(id: 'l3', date: anchor.subtract(const Duration(days: 2)), value: 35),
           LogEntry(id: 'l4', date: anchor.subtract(const Duration(days: 4)), value: 30),
-          LogEntry(id: 'l5', date: anchor.subtract(const Duration(days: 6)), value: 20),
         ],
       ),
       ExerciseItem(
@@ -173,9 +202,8 @@ class StorageService {
         unit: '个',
         target: 1000,
         history: [
-          LogEntry(id: 'l6', date: anchor.subtract(const Duration(days: 0)), value: 1000),
-          LogEntry(id: 'l7', date: anchor.subtract(const Duration(days: 1)), value: 800),
-          LogEntry(id: 'l8', date: anchor.subtract(const Duration(days: 3)), value: 1200),
+          LogEntry(id: 'l5', date: anchor.subtract(const Duration(days: 0)), value: 1000),
+          LogEntry(id: 'l6', date: anchor.subtract(const Duration(days: 1)), value: 800),
         ],
       ),
       ExerciseItem(
@@ -184,8 +212,7 @@ class StorageService {
         unit: '个',
         target: 50,
         history: [
-          LogEntry(id: 'l9', date: anchor.subtract(const Duration(days: 0)), value: 50),
-          LogEntry(id: 'l10', date: anchor.subtract(const Duration(days: 1)), value: 40),
+          LogEntry(id: 'l7', date: anchor.subtract(const Duration(days: 0)), value: 50),
         ],
       ),
     ];
@@ -208,7 +235,6 @@ class _HomePageState extends State<HomePage> {
   DateTime _selectedDate = DateTime.now();
   bool _isLoading = true;
 
-  // 日历范围参数：过去 50 周，未来 20 周
   final int _pastWeeks = 50;
   final int _futureWeeks = 20;
   final double _weekRowHeight = 64.0;
@@ -217,7 +243,6 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    // 自动滚动定位到当前周
     _calendarScrollController = ScrollController(
       initialScrollOffset: _pastWeeks * _weekRowHeight,
     );
@@ -294,7 +319,265 @@ class _HomePageState extends State<HomePage> {
   }
 
   // ------------------------------------------
-  // 弹窗逻辑
+  // 1. 日历长按快捷逻辑 (一键打卡/一键取消)
+  // ------------------------------------------
+
+  void _showCalendarDayLongPressMenu(DateTime day) {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${day.year}年${day.month}月${day.day}日 快捷操作',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            ListTile(
+              leading: const Icon(Icons.done_all, color: Colors.green),
+              title: const Text('一键全部打卡达标'),
+              subtitle: const Text('将当日未达标的项目自动补全至目标值'),
+              onTap: () {
+                Navigator.pop(context);
+                _checkInAllForDate(day);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.highlight_off, color: Colors.red),
+              title: const Text('一键取消/清空当日所有打卡'),
+              subtitle: const Text('移除当日所有项目的打卡记录'),
+              onTap: () {
+                Navigator.pop(context);
+                _clearAllCheckInForDate(day);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _checkInAllForDate(DateTime day) {
+    for (var ex in _exercises) {
+      double current = ex.totalForDate(day);
+      if (current < ex.target && ex.target > 0) {
+        double needed = ex.target - current;
+        ex.history.add(LogEntry(
+          id: '${DateTime.now().millisecondsSinceEpoch}_${ex.id}',
+          date: day,
+          value: needed,
+        ));
+      }
+    }
+    _saveData();
+    setState(() => _selectedDate = day);
+    _showSnackBar('已为 ${day.month}月${day.day}日 一键全部打卡达标！');
+  }
+
+  void _clearAllCheckInForDate(DateTime day) {
+    for (var ex in _exercises) {
+      ex.history.removeWhere((e) =>
+          e.date.year == day.year &&
+          e.date.month == day.month &&
+          e.date.day == day.day);
+    }
+    _saveData();
+    setState(() => _selectedDate = day);
+    _showSnackBar('已清空 ${day.month}月${day.day}日 的所有打卡记录');
+  }
+
+  // ------------------------------------------
+  // 2. 条目长按快捷逻辑 (一键取消/编辑/删除)
+  // ------------------------------------------
+
+  void _showItemLongPressMenu(ExerciseItem item) {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.remove_circle_outline, color: Colors.orange),
+              title: Text('一键取消 ${item.name} 当日打卡'),
+              subtitle: Text('清除 ${_selectedDate.month}月${_selectedDate.day}日 的打卡记录'),
+              onTap: () {
+                Navigator.pop(context);
+                _cancelTodayCheckIn(item);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.edit, color: Colors.indigo),
+              title: const Text('修改项目属性'),
+              subtitle: const Text('调整目标量、名称或单位'),
+              onTap: () {
+                Navigator.pop(context);
+                _showExerciseItemDialog(item: item);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: Colors.red),
+              title: const Text('删除该运动项目'),
+              subtitle: const Text('移除该项目及所有历史记录'),
+              onTap: () {
+                Navigator.pop(context);
+                _confirmDeleteExercise(item);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _cancelTodayCheckIn(ExerciseItem item) {
+    int beforeCount = item.history.length;
+    item.history.removeWhere((e) =>
+        e.date.year == _selectedDate.year &&
+        e.date.month == _selectedDate.month &&
+        e.date.day == _selectedDate.day);
+
+    if (item.history.length < beforeCount) {
+      _saveData();
+      _showSnackBar('已取消 ${item.name} 当日打卡');
+    } else {
+      _showSnackBar('${item.name} 当日暂无打卡记录');
+    }
+  }
+
+  // ------------------------------------------
+  // 3. 格式化数据导出与导入逻辑
+  // ------------------------------------------
+
+  void _showExportImportMenu() {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => Container(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.download_sharp, color: Colors.indigo),
+              title: const Text('导出备份数据 (JSON)'),
+              subtitle: const Text('将历史所有数据导出并复制到剪贴板保存'),
+              onTap: () {
+                Navigator.pop(context);
+                _showExportDialog();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.upload_sharp, color: Colors.green),
+              title: const Text('导入恢复数据 (JSON)'),
+              subtitle: const Text('粘贴 JSON 数据覆盖恢复'),
+              onTap: () {
+                Navigator.pop(context);
+                _showImportDialog();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showExportDialog() {
+    String jsonStr = jsonEncode(_exercises.map((e) => e.toJson()).toList());
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('导出备份数据'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('请复制下方 JSON 文本保存备份：', style: TextStyle(fontSize: 12)),
+            const SizedBox(height: 8),
+            TextField(
+              controller: TextEditingController(text: jsonStr),
+              maxLines: 6,
+              readOnly: true,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.all(8),
+              ),
+              style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.copy, size: 18),
+            label: const Text('复制到剪贴板'),
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: jsonStr));
+              Navigator.pop(context);
+              _showSnackBar('数据已成功复制到剪贴板！');
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showImportDialog() {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('导入恢复数据'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('请粘贴先前备份的 JSON 文本：', style: TextStyle(fontSize: 12)),
+            const SizedBox(height: 8),
+            TextField(
+              controller: controller,
+              maxLines: 6,
+              decoration: const InputDecoration(
+                hintText: '[{"id":"ex_1", ...}]',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.all(8),
+              ),
+              style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
+          ElevatedButton(
+            onPressed: () {
+              String input = controller.text.trim();
+              if (input.isEmpty) {
+                _showSnackBar('请输入 JSON 文本！');
+                return;
+              }
+              try {
+                final List<dynamic> list = jsonDecode(input);
+                List<ExerciseItem> imported = list.map((e) => ExerciseItem.fromJson(e)).toList();
+                setState(() {
+                  _exercises = imported;
+                });
+                _saveData();
+                Navigator.pop(context);
+                _showSnackBar('数据恢复成功！已导入 ${imported.length} 个项目');
+              } catch (e) {
+                _showSnackBar('JSON 解析失败，请检查文本格式！');
+              }
+            },
+            child: const Text('确认导入'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ------------------------------------------
+  // 打卡与项目编辑弹窗
   // ------------------------------------------
 
   void _showRecordDialog(ExerciseItem item) {
@@ -305,28 +588,32 @@ class _HomePageState extends State<HomePage> {
         return StatefulBuilder(builder: (context, setDialogState) {
           void addValue(double delta) {
             double curr = double.tryParse(controller.text) ?? 0;
-            controller.text = (curr + delta).toInt().toString();
+            double newVal = curr + delta;
+            controller.text = newVal % 1 == 0 ? newVal.toInt().toString() : newVal.toString();
           }
 
           return AlertDialog(
-            title: Text('记录：${item.name} (${item.unit})'),
+            title: Text('记录/调整：${item.name} (${item.unit})'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 TextField(
                   controller: controller,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
                   autofocus: true,
                   decoration: InputDecoration(
-                    labelText: '本次完成量',
+                    labelText: '完成量 (正数增加 / 负数扣减)',
                     suffixText: item.unit,
                     border: const OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 12),
                 Wrap(
-                  spacing: 8,
+                  spacing: 6,
+                  runSpacing: 6,
                   children: [
+                    ActionChip(label: const Text('-10'), onPressed: () => addValue(-10)),
+                    ActionChip(label: const Text('-5'), onPressed: () => addValue(-5)),
                     ActionChip(label: const Text('+5'), onPressed: () => addValue(5)),
                     ActionChip(label: const Text('+10'), onPressed: () => addValue(10)),
                     ActionChip(label: const Text('+20'), onPressed: () => addValue(20)),
@@ -346,8 +633,8 @@ class _HomePageState extends State<HomePage> {
               ElevatedButton(
                 onPressed: () {
                   double? val = double.tryParse(controller.text);
-                  if (val == null || val <= 0) {
-                    _showSnackBar('请输入大于 0 的有效数值！');
+                  if (val == null || val == 0) {
+                    _showSnackBar('请输入有效数值！');
                     return;
                   }
                   item.history.add(LogEntry(
@@ -357,9 +644,9 @@ class _HomePageState extends State<HomePage> {
                   ));
                   _saveData();
                   Navigator.pop(context);
-                  _showSnackBar('打卡成功！+ $val ${item.unit}');
+                  _showSnackBar('打卡记录更新！${val > 0 ? "+$val" : val} ${item.unit}');
                 },
-                child: const Text('打卡'),
+                child: const Text('保存记录'),
               ),
             ],
           );
@@ -490,8 +777,8 @@ class _HomePageState extends State<HomePage> {
                           itemBuilder: (context, idx) {
                             final log = dayLogs[idx];
                             return ListTile(
-                              title: Text('+ ${log.value} ${item.unit}'),
-                              subtitle: Text('记录 ID: ${log.id.substring(log.id.length - 4)}'),
+                              title: Text('${log.value > 0 ? "+" : ""}${log.value} ${item.unit}'),
+                              subtitle: Text('记录时间: ${log.date.hour.toString().padLeft(2, '0')}:${log.date.minute.toString().padLeft(2, '0')}'),
                               trailing: IconButton(
                                 icon: const Icon(Icons.delete_outline, color: Colors.red),
                                 onPressed: () {
@@ -516,7 +803,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   // ------------------------------------------
-  // 界面构建
+  // 界面构建 (UI Build)
   // ------------------------------------------
 
   @override
@@ -552,6 +839,11 @@ class _HomePageState extends State<HomePage> {
             },
           ),
           IconButton(
+            icon: const Icon(Icons.import_export),
+            tooltip: '数据备份与恢复',
+            onPressed: _showExportImportMenu,
+          ),
+          IconButton(
             icon: const Icon(Icons.add),
             tooltip: '添加项目',
             onPressed: () => _showExerciseItemDialog(),
@@ -560,9 +852,10 @@ class _HomePageState extends State<HomePage> {
       ),
       body: Column(
         children: [
+          // 1. 顶部统计看板
           _buildHeaderDashboard(completedToday),
 
-          // 2 周高对比滚动日历
+          // 2. 滚动日历区域 (支持长按一键全打卡/取消)
           Container(
             height: 165,
             decoration: BoxDecoration(
@@ -572,6 +865,7 @@ class _HomePageState extends State<HomePage> {
             child: _buildTwoWeekCalendar(),
           ),
 
+          // 3. 紧凑型运动项目列表 (支持长按弹出菜单)
           Expanded(
             child: _exercises.isEmpty
                 ? Center(
@@ -589,7 +883,7 @@ class _HomePageState extends State<HomePage> {
                     ),
                   )
                 : ListView.builder(
-                    padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+                    padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
                     itemCount: _exercises.length,
                     itemBuilder: (context, index) {
                       final item = _exercises[index];
@@ -597,7 +891,7 @@ class _HomePageState extends State<HomePage> {
                       bool isFinished = item.isCompletedOn(_selectedDate);
 
                       return InkWell(
-                        onLongPress: () => _confirmDeleteExercise(item),
+                        onLongPress: () => _showItemLongPressMenu(item),
                         child: Card(
                           elevation: isFinished ? 2 : 0.5,
                           color: isFinished ? Colors.green.shade50 : Colors.white,
@@ -657,7 +951,7 @@ class _HomePageState extends State<HomePage> {
 
                                 IconButton(
                                   icon: const Icon(Icons.list_alt, size: 20),
-                                  tooltip: '打卡明细',
+                                  tooltip: '明细',
                                   onPressed: () => _showDayDetailsModal(item),
                                 ),
                                 IconButton(
@@ -683,6 +977,56 @@ class _HomePageState extends State<HomePage> {
                       );
                     },
                   ),
+          ),
+
+          // 4. UI 底部毛主席语录激励面板
+          _buildMaoQuoteBanner(),
+        ],
+      ),
+    );
+  }
+
+  // 底部毛主席语录卡片
+  Widget _buildMaoQuoteBanner() {
+    String quote = MaoQuotes.getQuoteForDate(_selectedDate);
+    return Container(
+      margin: const EdgeInsets.fromLTRB(10, 4, 10, 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.red.shade50, Colors.amber.shade50],
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+        ),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.red.shade200, width: 0.8),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.format_quote, color: Colors.red.shade700, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '“ $quote ”',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.red.shade900,
+                  ),
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  '— 毛主席语录激励',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: Colors.red.shade700,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -721,10 +1065,8 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // 构建带月份清晰标注与大时间范围的滚动日历
   Widget _buildTwoWeekCalendar() {
     final now = DateTime.now();
-    // 扩展范围：生成从 50 周前到 20 周后的周列表
     List<DateTime> weekMondays = List.generate(_pastWeeks + _futureWeeks, (i) {
       int offset = i - _pastWeeks;
       DateTime monday = now.subtract(Duration(days: now.weekday - 1));
@@ -740,7 +1082,6 @@ class _HomePageState extends State<HomePage> {
         int weekNum = getIsoWeekNumber(monday);
         int year = getIsoYear(monday);
 
-        // 智能月份标签显示 (如: 7月 或 跨月时 7月~8月)
         String monthLabel = monday.month == sunday.month
             ? '${monday.month}月'
             : '${monday.month}月~${sunday.month}月';
@@ -770,6 +1111,7 @@ class _HomePageState extends State<HomePage> {
 
                   return GestureDetector(
                     onTap: () => setState(() => _selectedDate = day),
+                    onLongPress: () => _showCalendarDayLongPressMenu(day),
                     child: Container(
                       width: 42,
                       padding: const EdgeInsets.symmetric(vertical: 3),
@@ -790,7 +1132,6 @@ class _HomePageState extends State<HomePage> {
                               fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                             ),
                           ),
-                          // 当月 1 号额外显示月份提醒
                           if (day.day == 1)
                             Text(
                               '${day.month}月',
